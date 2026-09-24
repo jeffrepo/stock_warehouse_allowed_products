@@ -1,0 +1,1 @@
+# stock_warehouse_allowed_products
