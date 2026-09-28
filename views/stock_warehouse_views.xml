@@ -9,11 +9,16 @@
                 <group string="Control de productos" name="allowed_products">
                     <field name="allowed_product_ids" widget="many2many_tags"
                            options="{'no_create': True}"/>
+                    <field name="allowed_category_ids" widget="many2many_tags"
+                           options="{'no_create': True}"/>
                     <div class="text-muted" colspan="2">
-                        Una lista vacía permite todos los productos. Al seleccionar
-                        productos, solo estos podrán ingresar a las ubicaciones
-                        internas y de tránsito de este almacén, incluidas sus
-                        sububicaciones. Selecciona cada variante permitida.
+                        Si ambas listas están vacías, se permiten todos los
+                        productos. De lo contrario, se permite un producto si
+                        está seleccionado directamente o pertenece a una categoría
+                        permitida, incluidas sus subcategorías. Los productos
+                        seleccionados directamente se permiten aunque estén fuera
+                        de esas categorías. La regla aplica a todas las ubicaciones
+                        internas y de tránsito del almacén y sus sububicaciones.
                     </div>
                 </group>
             </xpath>

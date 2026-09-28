@@ -18,6 +18,16 @@ class TestWarehouseAllowedProducts(TransactionCase):
         ])
         cls.allowed_products = cls.product_1 | cls.product_2
         cls.warehouse_b.allowed_product_ids = cls.allowed_products
+        cls.category_allowed, cls.category_other = cls.env["product.category"].create([
+            {"name": "Allowed category"}, {"name": "Other category"},
+        ])
+        cls.category_child, cls.category_sibling = cls.env["product.category"].create([
+            {"name": name, "parent_id": cls.category_allowed.id}
+            for name in ("Child category", "Sibling category")
+        ])
+        cls.category_grandchild = cls.env["product.category"].create({
+            "name": "Grandchild category", "parent_id": cls.category_child.id,
+        })
         cls.source = cls.env["stock.location"].create({
             "name": "Source shelf", "usage": "internal",
             "location_id": cls.warehouse_a.lot_stock_id.id,
@@ -270,3 +280,116 @@ class TestWarehouseAllowedProducts(TransactionCase):
             self._move(product=self.product_3).with_user(user)._action_confirm()
         with self.assertRaises(AccessError), self.cr.savepoint():
             self.warehouse_b.with_user(user).allowed_product_ids = False
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_3.categ_id = self.category_allowed
+        self._complete(self._move(product=self.product_3).with_user(user))
+        with self.assertRaises(AccessError), self.cr.savepoint():
+            self.warehouse_b.with_user(user).allowed_category_ids = False
+
+    def test_category_only_allows_matching_product(self):
+        self.warehouse_b.allowed_product_ids = False
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_3.categ_id = self.category_allowed
+        self._complete(self._move(product=self.product_3))
+        self.assertEqual(self._quantity(self.product_3, self.deep_shelf), 1)
+
+    def test_category_only_blocks_other_products(self):
+        self.warehouse_b.allowed_product_ids = False
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_1.categ_id = self.category_other
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            self._move()._action_confirm()
+        self.assertEqual(self._quantity(self.product_1, self.deep_shelf), 0)
+
+    def test_products_and_categories_are_alternative_permissions(self):
+        self.warehouse_b.allowed_product_ids = self.product_1
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_1.categ_id = self.category_other
+        self.product_2.categ_id = self.category_allowed
+        self.product_3.categ_id = self.category_other
+        # Product 1 qualifies only by explicit selection, product 2 only by category.
+        for product in (self.product_1, self.product_2):
+            self._complete(self._move(product=product))
+            self.assertEqual(self._quantity(product, self.deep_shelf), 1)
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            self._move(product=self.product_3)._action_confirm()
+        self.assertEqual(self._quantity(self.product_3, self.deep_shelf), 0)
+
+    def test_categories_include_descendants_but_not_parents_or_siblings(self):
+        self.warehouse_b.allowed_product_ids = False
+        self.warehouse_b.allowed_category_ids = self.category_child
+        self.product_1.categ_id = self.category_grandchild
+        self.product_2.categ_id = self.category_allowed
+        self.product_3.categ_id = self.category_sibling
+        self._complete(self._move())
+        for product in (self.product_2, self.product_3):
+            with self.assertRaises(ValidationError), self.cr.savepoint():
+                self._move(product=product)._action_confirm()
+        # Selecting the root also includes products two levels below it.
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self._complete(self._move())
+        self.assertEqual(self._quantity(self.product_1, self.deep_shelf), 2)
+
+    def test_any_selected_category_can_allow_product(self):
+        self.warehouse_b.allowed_product_ids = False
+        self.warehouse_b.allowed_category_ids = self.category_allowed | self.category_other
+        self.product_1.categ_id = self.category_allowed
+        self.product_2.categ_id = self.category_other
+        for product in (self.product_1, self.product_2):
+            self._complete(self._move(product=product))
+            self.assertEqual(self._quantity(product, self.deep_shelf), 1)
+
+    def test_category_removed_after_confirmation_is_checked_again(self):
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_3.categ_id = self.category_allowed
+        move = self._move(product=self.product_3)
+        move._action_confirm()
+        move.quantity_done = 1
+        # The explicit list remains configured, so removing categories restricts it.
+        self.warehouse_b.allowed_category_ids = False
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            move._action_done()
+        self.assertEqual(self._quantity(self.product_3, self.deep_shelf), 0)
+        self.assertEqual(self._quantity(self.product_3, self.source), 20)
+
+    def test_product_category_changed_after_confirmation_is_checked_again(self):
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_3.categ_id = self.category_allowed
+        move = self._move(product=self.product_3)
+        move._action_confirm()
+        move.quantity_done = 1
+        self.product_3.categ_id = self.category_other
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            move._action_done()
+        self.assertEqual(self._quantity(self.product_3, self.deep_shelf), 0)
+
+    def test_category_reparented_after_confirmation_is_checked_again(self):
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_3.categ_id = self.category_grandchild
+        move = self._move(product=self.product_3)
+        move._action_confirm()
+        move.quantity_done = 1
+        self.category_child.parent_id = self.category_other
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            move._action_done()
+        self.assertEqual(self._quantity(self.product_3, self.deep_shelf), 0)
+
+    def test_inventory_respects_categories(self):
+        self.warehouse_b.allowed_product_ids = False
+        self.warehouse_b.allowed_category_ids = self.category_allowed
+        self.product_1.categ_id = self.category_child
+        self.product_3.categ_id = self.category_other
+        allowed_quant, forbidden_quant = self.env["stock.quant"].with_context(
+            inventory_mode=True,
+        ).create([
+            {
+                "product_id": product.id, "location_id": self.deep_shelf.id,
+                "inventory_quantity": 3,
+            }
+            for product in (self.product_1, self.product_3)
+        ])
+        allowed_quant.action_apply_inventory()
+        self.assertEqual(allowed_quant.quantity, 3)
+        with self.assertRaises(ValidationError), self.cr.savepoint():
+            forbidden_quant.action_apply_inventory()
+        self.assertEqual(forbidden_quant.quantity, 0)

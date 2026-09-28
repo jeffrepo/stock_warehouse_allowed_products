@@ -10,13 +10,26 @@ Versión: Odoo 15.0 · Dependencia: `stock` · Licencia: LGPL-3
 2. Abrir **Inventario → Configuración → Almacenes** y seleccionar un almacén.
 3. En **Control de productos → Productos permitidos**, agregar los productos que
    puede recibir. La selección se realiza por variante (`product.product`).
+4. En **Categorías permitidas**, seleccionar las categorías de producto
+   (`product.category`) que puede recibir. Incluye sus subcategorías a cualquier
+   profundidad y todas las variantes de los productos que pertenecen a ellas.
 
-**Una lista vacía permite todos los productos.** Una lista con productos activa
-la restricción. Vaciarla nuevamente elimina la restricción del almacén.
+**Ambas listas vacías permiten todos los productos.** Si cualquiera de las dos
+contiene elementos, se permite un producto cuando cumple al menos una condición:
 
-Por ejemplo, si el almacén B permite los productos 1 y 2, un traslado del producto
-3 desde cualquier origen a B se bloquea con un mensaje que identifica el
-producto, el almacén y la ubicación destino.
+- Está seleccionado directamente en **Productos permitidos**, aunque no
+  pertenezca a ninguna categoría seleccionada.
+- Pertenece a una de las **Categorías permitidas** o a alguna de sus subcategorías,
+  aunque no esté seleccionado directamente como producto.
+
+Solo se bloquean los productos que no cumplen ninguna condición. Vaciar ambas
+listas elimina la restricción del almacén.
+
+Por ejemplo, si el almacén B permite la categoría **Panadería** y el producto
+**Leche**, recibe los productos de Panadería (y sus subcategorías) y también
+Leche, aunque Leche pertenezca a otra categoría. Cualquier otro producto se
+bloquea con un mensaje que identifica el producto, el almacén y la ubicación
+destino.
 
 ## Alcance
 
@@ -53,6 +66,11 @@ Colocar la carpeta `stock_warehouse_allowed_products` en una ruta de addons,
 reiniciar Odoo, actualizar la lista de aplicaciones e instalar
 **Productos permitidos por almacén**. No requiere depender del módulo `quemen`.
 
+Si ya estaba instalado, reiniciar Odoo y **actualizar el módulo** desde
+Aplicaciones, o usar `-u stock_warehouse_allowed_products`. La versión
+`15.0.1.1.0` añade las categorías sin cambiar los productos previamente
+seleccionados: mientras no se seleccionen categorías, conserva la regla anterior.
+
 ## Pruebas
 
 La suite usa movimientos, operaciones detalladas y existencias reales del ORM.
@@ -66,7 +84,8 @@ odoo-bin -d test_warehouse_allowed_products \
   --stop-after-init --without-demo=all
 ```
 
-Las pruebas cubren listas vacías, destinos anidados, recepciones desde distintos
-orígenes, cambios de configuración, destinos de operaciones detalladas,
+Las pruebas cubren listas vacías, la combinación de productos y categorías con
+lógica OR, subcategorías, cambios de categoría, destinos anidados, recepciones
+desde distintos orígenes, cambios de configuración, destinos de operaciones detalladas,
 operaciones mixtas, ajustes de inventario, correcciones posteriores, salidas de
 existencias previas, productos archivados y separación por compañía.
